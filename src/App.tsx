@@ -13,8 +13,7 @@ export default function App() {
             SK Invoice Generator
           </Typography>
           <Typography className="hero-subtitle">
-            Design professional invoices with branding, and instant PDF
-            downloads.
+            Design professional invoices with branding, and instant PDF Downloads.
           </Typography>
         </Box>
         <InvoiceForm />
