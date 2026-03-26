@@ -1,6 +1,7 @@
 import { useState, type JSX } from "react";
 import {
   Box,
+  Chip,
   TextField,
   Button,
   Grid,
@@ -9,6 +10,7 @@ import {
   Typography,
   Divider,
   InputAdornment,
+  Tooltip,
 } from "@mui/material";
 import jsPDF from "jspdf";
 
@@ -20,14 +22,10 @@ type InvoiceItem = {
 
 const InvoiceForm = (): JSX.Element => {
   const [companyName, setCompanyName] = useState<string>("");
-  const [companyEmail, setCompanyEmail] = useState<string>(
-    "",
-  );
+  const [companyEmail, setCompanyEmail] = useState<string>("");
   const [companyPhone, setCompanyPhone] = useState<string>("");
   const [customer, setCustomer] = useState<string>("");
-  const [customerEmail, setCustomerEmail] = useState<string>(
-    "",
-  );
+  const [customerEmail, setCustomerEmail] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
   const [invoiceDate, setInvoiceDate] = useState<string>(
@@ -40,6 +38,7 @@ const InvoiceForm = (): JSX.Element => {
   const [notes, setNotes] = useState<string>("");
   const [paymentTerms, setPaymentTerms] = useState<string>("");
   const [logoDataUrl, setLogoDataUrl] = useState<string>("");
+  const [isPro, setIsPro] = useState<boolean>(false);
 
   const [items, setItems] = useState<InvoiceItem[]>([
     { name: "", quantity: "1", rate: "" },
@@ -229,8 +228,25 @@ const InvoiceForm = (): JSX.Element => {
     doc.text(`Grand Total: ${money(total)}`, 120, y + 2);
 
     y += 12;
-    y = addLine(doc, "Payment Terms", paymentTerms, 14, y, 176);
-    addLine(doc, "Notes", notes || "Thank you for your business.", 14, y, 176);
+    if (paymentTerms) {
+      y = addLine(doc, "Payment Terms", paymentTerms, 14, y, 176);
+    }
+    if (notes) {
+      addLine(doc, "Notes", notes, 14, y, 176);
+    }
+
+    if (!isPro) {
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(52);
+      doc.setTextColor(230, 230, 230);
+      doc.text("SK Invoice", pageW / 2, pageH / 2, {
+        align: "center",
+        angle: 45,
+      });
+      doc.setTextColor(0, 0, 0);
+    }
 
     doc.save(`${invoiceNumber || "invoice"}.pdf`);
   };
@@ -239,9 +255,45 @@ const InvoiceForm = (): JSX.Element => {
     <Paper className="invoice-paper" elevation={0}>
       <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
         <Box sx={{ flex: 1 }}>
-          <Typography variant="h5" className="section-title">
-            Invoice Builder
-          </Typography>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Typography variant="h5" className="section-title">
+              Invoice Builder
+            </Typography>
+            {isPro ? (
+              <Chip
+                label="PRO"
+                size="small"
+                sx={{
+                  background: "linear-gradient(135deg,#f59e0b,#d97706)",
+                  color: "#fff",
+                  fontWeight: 700,
+                  fontSize: "0.7rem",
+                }}
+              />
+            ) : (
+              <Tooltip title="Upgrade to Pro to remove watermark from PDF">
+                <Chip
+                  label="FREE"
+                  size="small"
+                  variant="outlined"
+                  sx={{ fontWeight: 600, fontSize: "0.7rem", cursor: "pointer" }}
+                  onClick={() => setIsPro(true)}
+                />
+              </Tooltip>
+            )}
+          </Stack>
+          {!isPro && (
+            <Typography variant="caption" sx={{ color: "#e67e22", mt: 0.5, display: "block" }}>
+              Free version — PDF includes watermark.{" "}
+              <Box
+                component="span"
+                sx={{ textDecoration: "underline", cursor: "pointer" }}
+                onClick={() => setIsPro(true)}
+              >
+                Upgrade to Pro
+              </Box>
+            </Typography>
+          )}
         </Box>
         <Stack direction="row" spacing={1.5}>
           <Button variant="contained" onClick={generatePDF}>
@@ -375,9 +427,33 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
       </Grid>
 
-      <Box className="logo-upload-zone" sx={{ mt: 3 }}>
-        <Typography variant="subtitle2">Company Logo</Typography>
-        <Button variant="text" component="label" sx={{ mt: 1 }}>
+      <Box
+        className="logo-upload-zone"
+        sx={{ mt: 3, opacity: isPro ? 1 : 0.55, pointerEvents: isPro ? "auto" : "none" }}
+      >
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Typography variant="subtitle2">Company Logo</Typography>
+          {!isPro && (
+            <Chip
+              label="PRO only"
+              size="small"
+              sx={{ fontSize: "0.65rem", height: 18, bgcolor: "#fef3c7", color: "#92400e", pointerEvents: "auto" }}
+            />
+          )}
+        </Stack>
+        {!isPro && (
+          <Typography variant="caption" sx={{ color: "#b45309", display: "block", mb: 0.5 }}>
+            Logo on PDF is a Pro feature.{" "}
+            <Box
+              component="span"
+              sx={{ textDecoration: "underline", cursor: "pointer", pointerEvents: "auto" }}
+              onClick={() => setIsPro(true)}
+            >
+              Upgrade to Pro
+            </Box>
+          </Typography>
+        )}
+        <Button variant="text" component="label" sx={{ mt: 0.5 }} disabled={!isPro}>
           Upload Logo
           <input
             hidden
