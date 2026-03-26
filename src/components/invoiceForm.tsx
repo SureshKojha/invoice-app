@@ -134,9 +134,37 @@ const InvoiceForm = (): JSX.Element => {
   const generatePDF = () => {
     const doc = new jsPDF();
     let y = 16;
+    let invoiceMetaStartY = y + 14;
 
     if (logoDataUrl) {
-      doc.addImage(logoDataUrl, getLogoFormat(logoDataUrl), 14, y - 4, 28, 16);
+      const logoBoxX = 14;
+      const logoBoxY = y - 5;
+      const logoBoxWidth = 32;
+      const logoBoxHeight = 20;
+      const logoPadding = 2;
+
+      doc.setDrawColor(220);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(
+        logoBoxX,
+        logoBoxY,
+        logoBoxWidth,
+        logoBoxHeight,
+        2,
+        2,
+        "FD",
+      );
+      doc.addImage(
+        logoDataUrl,
+        getLogoFormat(logoDataUrl),
+        logoBoxX + logoPadding,
+        logoBoxY + logoPadding,
+        logoBoxWidth - logoPadding * 2,
+        logoBoxHeight - logoPadding * 2,
+      );
+
+      const logoBottomY = logoBoxY + logoBoxHeight;
+      invoiceMetaStartY = Math.max(invoiceMetaStartY, logoBottomY + 8);
     }
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
@@ -144,7 +172,7 @@ const InvoiceForm = (): JSX.Element => {
     doc.setFontSize(11);
     doc.setFont("helvetica", "normal");
 
-    y = addLine(doc, "Invoice #", invoiceNumber, 14, y + 14, 150);
+    y = addLine(doc, "Invoice #", invoiceNumber, 14, invoiceMetaStartY, 150);
     y = addLine(doc, "Invoice Date", formatDateForPdf(invoiceDate), 14, y, 150);
     y = addLine(doc, "Due Date", formatDateForPdf(dueDate), 14, y, 150);
 
