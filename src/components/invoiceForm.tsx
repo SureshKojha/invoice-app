@@ -29,7 +29,7 @@ const InvoiceForm = (): JSX.Element => {
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
   const [invoiceDate, setInvoiceDate] = useState<string>(
-    new Date().toISOString().slice(0, 10),
+    new Date().toLocaleDateString("en-GB"),
   );
   const [dueDate, setDueDate] = useState<string>("");
   const [currency, setCurrency] = useState<string>("INR");
@@ -38,7 +38,7 @@ const InvoiceForm = (): JSX.Element => {
   const [notes, setNotes] = useState<string>("");
   const [paymentTerms, setPaymentTerms] = useState<string>("");
   const [logoDataUrl, setLogoDataUrl] = useState<string>("");
-  const [isPro, setIsPro] = useState<boolean>(false);
+  const [isPro, setIsPro] = useState<boolean>(true);
 
   const [items, setItems] = useState<InvoiceItem[]>([
     { name: "", quantity: "1", rate: "" },
@@ -104,13 +104,17 @@ const InvoiceForm = (): JSX.Element => {
       return "";
     }
 
-    const parts = value.split("-");
-    if (parts.length !== 3) {
-      return "";
+    if (value.includes("/")) {
+      return value;
     }
 
-    const [year, month, day] = parts;
-    return `${day}/${month}/${year}`;
+    const parts = value.split("-");
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${day}/${month}/${year}`;
+    }
+
+    return value;
   };
 
   const addLine = (
@@ -200,19 +204,62 @@ const InvoiceForm = (): JSX.Element => {
     y += 6;
     doc.setFont("helvetica", "bold");
     doc.text("Items", 14, y);
-    y += 6;
+    y += 4;
 
+    const tableX = 14;
+    const tableW = 182;
+    const colItemW = 104;
+    const colQtyW = 18;
+    const colRateW = 30;
+    const colTotalW = 30;
+    const headerH = 8;
+
+    const xItem = tableX;
+    const xQty = xItem + colItemW;
+    const xRate = xQty + colQtyW;
+    const xTotal = xRate + colRateW;
+    const xEnd = tableX + tableW;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFillColor(245, 245, 245);
+    doc.rect(tableX, y, tableW, headerH, "FD");
+    doc.rect(tableX, y, tableW, headerH);
+    doc.line(xQty, y, xQty, y + headerH);
+    doc.line(xRate, y, xRate, y + headerH);
+    doc.line(xTotal, y, xTotal, y + headerH);
+
+    doc.text("Item", xItem + 2, y + 5.5);
+    doc.text("Qty", xQty + colQtyW / 2, y + 5.5, { align: "center" });
+    doc.text("Rate", xRate + colRateW - 2, y + 5.5, { align: "right" });
+    doc.text("Total", xEnd - 2, y + 5.5, { align: "right" });
+    y += headerH;
+
+    doc.setFont("helvetica", "normal");
     items.forEach((item, index) => {
       const qty = Number(item.quantity || 0);
       const rate = Number(item.rate || 0);
       const lineTotal = qty * rate;
-      const lineText = `${index + 1}. ${item.name || "Service"} | Qty: ${qty} | Rate: ${money(
-        rate,
-      )} | Total: ${money(lineTotal)}`;
-      const lines = doc.splitTextToSize(lineText, 178);
-      doc.setFont("helvetica", "normal");
-      doc.text(lines, 14, y);
-      y += lines.length * 6;
+      const itemLabel = `${index + 1}. ${item.name || "Service"}`;
+      const itemLines = doc.splitTextToSize(itemLabel, colItemW - 4);
+      const rowH = Math.max(8, itemLines.length * 5 + 2);
+
+      doc.rect(tableX, y, tableW, rowH);
+      doc.line(xQty, y, xQty, y + rowH);
+      doc.line(xRate, y, xRate, y + rowH);
+      doc.line(xTotal, y, xTotal, y + rowH);
+
+      doc.text(itemLines, xItem + 2, y + 5);
+      doc.text(String(qty), xQty + colQtyW / 2, y + rowH / 2 + 1.5, {
+        align: "center",
+      });
+      doc.text(money(rate), xRate + colRateW - 2, y + rowH / 2 + 1.5, {
+        align: "right",
+      });
+      doc.text(money(lineTotal), xEnd - 2, y + rowH / 2 + 1.5, {
+        align: "right",
+      });
+
+      y += rowH;
     });
 
     y += 4;
@@ -374,7 +421,7 @@ const InvoiceForm = (): JSX.Element => {
         <Grid item xs={12} md={4}>
           <TextField
             label="Invoice Date"
-            type="date"
+            placeholder="dd/mm/yyyy"
             fullWidth
             value={invoiceDate}
             onChange={(e) => setInvoiceDate(e.target.value)}
@@ -384,7 +431,7 @@ const InvoiceForm = (): JSX.Element => {
         <Grid item xs={12} md={4}>
           <TextField
             label="Due Date"
-            type="date"
+            placeholder="dd/mm/yyyy"
             fullWidth
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
