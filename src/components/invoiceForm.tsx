@@ -211,7 +211,7 @@ const InvoiceForm = (): JSX.Element => {
     const colItemW = 104;
     const colQtyW = 18;
     const colRateW = 30;
-    const colTotalW = 30;
+    //const colTotalW = 30;
     const headerH = 8;
 
     const xItem = tableX;
