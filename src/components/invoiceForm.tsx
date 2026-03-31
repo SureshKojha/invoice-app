@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import {
   Box,
   Chip,
@@ -10,14 +10,108 @@ import {
   Typography,
   Divider,
   InputAdornment,
-  Tooltip,
+  Collapse,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
 } from "@mui/material";
 import jsPDF from "jspdf";
+
+const CURRENCIES: {
+  code: string;
+  symbol: string;
+  label: string;
+  defaultTax: number;
+  taxLabel: string;
+}[] = [
+  { code: "INR", symbol: "₹",   label: "₹ INR – Indian Rupee",        defaultTax: 18,  taxLabel: "GST" },
+  { code: "USD", symbol: "$",   label: "$ USD – US Dollar",           defaultTax: 0,   taxLabel: "Tax (varies by state)" },
+  { code: "EUR", symbol: "€",   label: "€ EUR – Euro",                defaultTax: 20,  taxLabel: "VAT" },
+  { code: "GBP", symbol: "£",   label: "£ GBP – British Pound",       defaultTax: 20,  taxLabel: "VAT" },
+  { code: "AED", symbol: "د.إ", label: "د.إ AED – UAE Dirham",        defaultTax: 5,   taxLabel: "VAT" },
+  { code: "SGD", symbol: "S$",  label: "S$ SGD – Singapore Dollar",   defaultTax: 9,   taxLabel: "GST" },
+  { code: "AUD", symbol: "A$",  label: "A$ AUD – Australian Dollar",  defaultTax: 10,  taxLabel: "GST" },
+  { code: "CAD", symbol: "C$",  label: "C$ CAD – Canadian Dollar",    defaultTax: 5,   taxLabel: "GST" },
+  { code: "JPY", symbol: "¥",   label: "¥ JPY – Japanese Yen",        defaultTax: 10,  taxLabel: "Consumption Tax" },
+  { code: "CHF", symbol: "CHF", label: "CHF – Swiss Franc",           defaultTax: 8.1, taxLabel: "VAT" },
+];
+
+type GstType = "CGST_SGST" | "IGST" | "NONE";
 
 type InvoiceItem = {
   name: string;
   quantity: string;
   rate: string;
+};
+
+type LabelSettings = {
+  businessName: string;
+  companyEmail: string;
+  businessPhone: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  discount: string;
+  taxRate: string;
+  itemName: string;
+  itemQty: string;
+  itemRate: string;
+  paymentTerms: string;
+  notes: string;
+};
+
+type DefaultSettings = {
+  companyName: string;
+  companyEmail: string;
+  companyPhone: string;
+  companyGSTIN: string;
+  customerGSTIN: string;
+  currency: string;
+  discount: string;
+  taxRate: string;
+  gstType: GstType;
+  paymentTerms: string;
+  notes: string;
+};
+
+const LABELS_STORAGE_KEY = "invoice-app-label-settings";
+const DEFAULTS_STORAGE_KEY = "invoice-app-default-settings";
+
+const DEFAULT_LABELS: LabelSettings = {
+  businessName: "Business Name",
+  companyEmail: "Company Email",
+  businessPhone: "Business Mobile",
+  customerName: "Customer Name",
+  customerEmail: "Client Email",
+  customerPhone: "Customer Mobile",
+  invoiceNumber: "Invoice Number",
+  invoiceDate: "Invoice Date",
+  dueDate: "Due Date",
+  discount: "Discount",
+  taxRate: "Tax Rate",
+  itemName: "Item / Service",
+  itemQty: "Qty",
+  itemRate: "Rate",
+  paymentTerms: "Terms",
+  notes: "Notes",
+};
+
+const DEFAULT_SETTINGS: DefaultSettings = {
+  companyName: "",
+  companyEmail: "",
+  companyPhone: "",
+  companyGSTIN: "",
+  customerGSTIN: "",
+  currency: "INR",
+  discount: "0",
+  taxRate: "18",
+  gstType: "CGST_SGST",
+  paymentTerms: "",
+  notes: "",
 };
 
 const InvoiceForm = (): JSX.Element => {
@@ -35,14 +129,84 @@ const InvoiceForm = (): JSX.Element => {
   const [currency, setCurrency] = useState<string>("INR");
   const [discount, setDiscount] = useState<string>("0");
   const [taxRate, setTaxRate] = useState<string>("18");
+
+  const handleCurrencyChange = (newCode: string) => {
+    setCurrency(newCode);
+    const found = CURRENCIES.find((c) => c.code === newCode);
+    setTaxRate(String(found?.defaultTax ?? 0));
+  };
   const [notes, setNotes] = useState<string>("");
   const [paymentTerms, setPaymentTerms] = useState<string>("");
   const [logoDataUrl, setLogoDataUrl] = useState<string>("");
   const [isPro, setIsPro] = useState<boolean>(true);
+  const [gstType, setGstType] = useState<GstType>("CGST_SGST");
+  const [companyGSTIN, setCompanyGSTIN] = useState<string>("");
+  const [customerGSTIN, setCustomerGSTIN] = useState<string>("");
+  const [labels, setLabels] = useState<LabelSettings>(DEFAULT_LABELS);
+  const [defaultSettings, setDefaultSettings] =
+    useState<DefaultSettings>(DEFAULT_SETTINGS);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(true);
 
   const [items, setItems] = useState<InvoiceItem[]>([
     { name: "", quantity: "1", rate: "" },
   ]);
+
+  useEffect(() => {
+    try {
+      const savedLabels = localStorage.getItem(LABELS_STORAGE_KEY);
+      if (savedLabels) {
+        setLabels({ ...DEFAULT_LABELS, ...(JSON.parse(savedLabels) as Partial<LabelSettings>) });
+      }
+
+      const savedDefaults = localStorage.getItem(DEFAULTS_STORAGE_KEY);
+      if (savedDefaults) {
+        const parsed = {
+          ...DEFAULT_SETTINGS,
+          ...(JSON.parse(savedDefaults) as Partial<DefaultSettings>),
+        };
+        setDefaultSettings(parsed);
+        setCompanyName(parsed.companyName);
+        setCompanyEmail(parsed.companyEmail);
+        setCompanyPhone(parsed.companyPhone);
+        setCompanyGSTIN(parsed.companyGSTIN);
+        setCustomerGSTIN(parsed.customerGSTIN);
+        setCurrency(parsed.currency);
+        setDiscount(parsed.discount);
+        setTaxRate(parsed.taxRate);
+        setGstType(parsed.gstType);
+        setPaymentTerms(parsed.paymentTerms);
+        setNotes(parsed.notes);
+      }
+    } catch {
+      // Ignore malformed storage values and continue with defaults.
+    }
+  }, []);
+
+  const saveSettings = () => {
+    localStorage.setItem(LABELS_STORAGE_KEY, JSON.stringify(labels));
+    localStorage.setItem(DEFAULTS_STORAGE_KEY, JSON.stringify(defaultSettings));
+  };
+
+  const applyDefaultValues = () => {
+    setCompanyName(defaultSettings.companyName);
+    setCompanyEmail(defaultSettings.companyEmail);
+    setCompanyPhone(defaultSettings.companyPhone);
+    setCompanyGSTIN(defaultSettings.companyGSTIN);
+    setCustomerGSTIN(defaultSettings.customerGSTIN);
+    setCurrency(defaultSettings.currency);
+    setDiscount(defaultSettings.discount);
+    setTaxRate(defaultSettings.taxRate);
+    setGstType(defaultSettings.gstType);
+    setPaymentTerms(defaultSettings.paymentTerms);
+    setNotes(defaultSettings.notes);
+  };
+
+  const resetSettings = () => {
+    setLabels(DEFAULT_LABELS);
+    setDefaultSettings(DEFAULT_SETTINGS);
+    localStorage.removeItem(LABELS_STORAGE_KEY);
+    localStorage.removeItem(DEFAULTS_STORAGE_KEY);
+  };
 
   const handleItemChange = (
     index: number,
@@ -90,8 +254,16 @@ const InvoiceForm = (): JSX.Element => {
   const taxAmount = taxableAmount * (Number(taxRate || 0) / 100);
   const total = taxableAmount + taxAmount;
 
+  const isInr = currency === "INR";
+  const cgst = isInr && gstType === "CGST_SGST" ? taxAmount / 2 : 0;
+  const sgst = isInr && gstType === "CGST_SGST" ? taxAmount / 2 : 0;
+  const igst = isInr && gstType === "IGST" ? taxAmount : 0;
+
+  const currencyMeta = CURRENCIES.find((c) => c.code === currency);
+  const currencySymbol = currencyMeta?.symbol ?? currency;
+  const taxLabel = currencyMeta?.taxLabel ?? "Tax";
   const money = (value: number) =>
-    `${currency} ${value.toLocaleString("en-IN", {
+    `${currencySymbol} ${value.toLocaleString("en-IN", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
@@ -175,9 +347,9 @@ const InvoiceForm = (): JSX.Element => {
     doc.setFontSize(11);
     doc.setFont("helvetica", "normal");
 
-    y = addLine(doc, "Invoice #", invoiceNumber, 14, invoiceMetaStartY, 150);
-    y = addLine(doc, "Invoice Date", formatDateForPdf(invoiceDate), 14, y, 150);
-    y = addLine(doc, "Due Date", formatDateForPdf(dueDate), 14, y, 150);
+    y = addLine(doc, labels.invoiceNumber, invoiceNumber, 14, invoiceMetaStartY, 150);
+    y = addLine(doc, labels.invoiceDate, formatDateForPdf(invoiceDate), 14, y, 150);
+    y = addLine(doc, labels.dueDate, formatDateForPdf(dueDate), 14, y, 150);
 
     y += 4;
     doc.setDrawColor(210);
@@ -187,7 +359,7 @@ const InvoiceForm = (): JSX.Element => {
     y = addLine(
       doc,
       "From",
-      `${companyName} (${companyEmail})${companyPhone ? `, ${companyPhone}` : ""}`,
+      `${companyName} (${companyEmail})${companyPhone ? `, ${companyPhone}` : ""}${companyGSTIN ? ` | GSTIN: ${companyGSTIN}` : ""}`,
       14,
       y,
       150,
@@ -195,7 +367,7 @@ const InvoiceForm = (): JSX.Element => {
     y = addLine(
       doc,
       "Bill To",
-      `${customer} (${customerEmail})${customerPhone ? `, ${customerPhone}` : ""}`,
+      `${customer} (${customerEmail})${customerPhone ? `, ${customerPhone}` : ""}${customerGSTIN ? ` | GSTIN: ${customerGSTIN}` : ""}`,
       14,
       y,
       150,
@@ -269,7 +441,14 @@ const InvoiceForm = (): JSX.Element => {
 
     y = addLine(doc, "Subtotal", money(subtotal), 120, y, 74);
     y = addLine(doc, "Discount", money(discountValue), 120, y, 74);
-    y = addLine(doc, `Tax (${taxRate || 0}%)`, money(taxAmount), 120, y, 74);
+    if (isInr && gstType === "CGST_SGST") {
+      y = addLine(doc, `CGST (${(Number(taxRate || 0) / 2).toFixed(1)}%)`, money(cgst), 120, y, 74);
+      y = addLine(doc, `SGST (${(Number(taxRate || 0) / 2).toFixed(1)}%)`, money(sgst), 120, y, 74);
+    } else if (isInr && gstType === "IGST") {
+      y = addLine(doc, `IGST (${taxRate || 0}%)`, money(igst), 120, y, 74);
+    } else {
+      y = addLine(doc, `${taxLabel} (${taxRate || 0}%)`, money(taxAmount), 120, y, 74);
+    }
 
     doc.setFont("helvetica", "bold");
     doc.text(`Grand Total: ${money(total)}`, 120, y + 2);
@@ -300,35 +479,231 @@ const InvoiceForm = (): JSX.Element => {
 
   return (
     <Paper className="invoice-paper" elevation={0}>
+      <Grid container spacing={2.5} sx={{ mb: 2 }}>
+        <Grid item xs={12} md={4} lg={3} sx={{ order: { xs: 0, md: 2 } }}>
+          <Box
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: "1px solid #d7e3ee",
+              background: "linear-gradient(160deg, #f4f8ff, #eef6f1)",
+              position: { md: "sticky" },
+              top: 12,
+              fontFamily: '"Trebuchet MS", "Segoe UI", sans-serif',
+              "& .MuiInputLabel-root": {
+                fontWeight: 600,
+                fontSize: "0.82rem",
+                letterSpacing: "0.01em",
+              },
+              "& .MuiInputBase-input": {
+                fontSize: "0.88rem",
+                fontWeight: 500,
+              },
+            }}
+          >
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                Form Settings
+              </Typography>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setSettingsOpen((prev) => !prev)}
+                sx={{ minWidth: 0, fontSize: "0.75rem", textTransform: "none" }}
+              >
+                {settingsOpen ? "Collapse" : "Expand"}
+              </Button>
+            </Stack>
+            <Typography variant="caption" sx={{ display: "block", mb: 1.5, opacity: 0.75 }}>
+              Customize field labels and save your defaults locally.
+            </Typography>
+
+            <Collapse in={settingsOpen}>
+              <Stack spacing={1.5}>
+              <Box>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ mb: 1, fontWeight: 800, letterSpacing: "0.03em", color: "#174a7d" }}
+                >
+                  Label Settings
+                </Typography>
+                <Stack spacing={1.1}>
+                  <TextField
+                    label="Label: Business Name"
+                    size="small"
+                    value={labels.businessName}
+                    onChange={(e) => setLabels((prev) => ({ ...prev, businessName: e.target.value }))}
+                  />
+                  <TextField
+                    label="Label: Company Email"
+                    size="small"
+                    value={labels.companyEmail}
+                    onChange={(e) => setLabels((prev) => ({ ...prev, companyEmail: e.target.value }))}
+                  />
+                  <TextField
+                    label="Label: Business Mobile"
+                    size="small"
+                    value={labels.businessPhone}
+                    onChange={(e) => setLabels((prev) => ({ ...prev, businessPhone: e.target.value }))}
+                  />
+                  <TextField
+                    label="Label: Customer Name"
+                    size="small"
+                    value={labels.customerName}
+                    onChange={(e) => setLabels((prev) => ({ ...prev, customerName: e.target.value }))}
+                  />
+                  <TextField
+                    label="Label: Client Email"
+                    size="small"
+                    value={labels.customerEmail}
+                    onChange={(e) => setLabels((prev) => ({ ...prev, customerEmail: e.target.value }))}
+                  />
+                  <TextField
+                    label="Label: Customer Mobile"
+                    size="small"
+                    value={labels.customerPhone}
+                    onChange={(e) => setLabels((prev) => ({ ...prev, customerPhone: e.target.value }))}
+                  />
+                  <TextField
+                    label="Label: Invoice Number"
+                    size="small"
+                    value={labels.invoiceNumber}
+                    onChange={(e) => setLabels((prev) => ({ ...prev, invoiceNumber: e.target.value }))}
+                  />
+                  <TextField
+                    label="Label: Discount"
+                    size="small"
+                    value={labels.discount}
+                    onChange={(e) => setLabels((prev) => ({ ...prev, discount: e.target.value }))}
+                  />
+                  <TextField
+                    label="Label: Tax Rate"
+                    size="small"
+                    value={labels.taxRate}
+                    onChange={(e) => setLabels((prev) => ({ ...prev, taxRate: e.target.value }))}
+                  />
+                </Stack>
+              </Box>
+
+              <Divider sx={{ my: 0.5 }} />
+
+              <Box>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ mb: 1, fontWeight: 800, letterSpacing: "0.03em", color: "#174a7d" }}
+                >
+                  Default Values
+                </Typography>
+                <Stack spacing={1.1}>
+                  <TextField
+                    label="Default Business Name"
+                    size="small"
+                    value={defaultSettings.companyName}
+                    onChange={(e) =>
+                      setDefaultSettings((prev) => ({ ...prev, companyName: e.target.value }))
+                    }
+                  />
+                  <TextField
+                    label="Default Company Email"
+                    size="small"
+                    value={defaultSettings.companyEmail}
+                    onChange={(e) =>
+                      setDefaultSettings((prev) => ({ ...prev, companyEmail: e.target.value }))
+                    }
+                  />
+                  <TextField
+                    label="Default Business Mobile"
+                    size="small"
+                    value={defaultSettings.companyPhone}
+                    onChange={(e) =>
+                      setDefaultSettings((prev) => ({ ...prev, companyPhone: e.target.value }))
+                    }
+                  />
+                  {defaultSettings.currency === "INR" && (
+                    <>
+                      <TextField
+                        label="Default Business GSTIN"
+                        size="small"
+                        value={defaultSettings.companyGSTIN}
+                        inputProps={{ maxLength: 15 }}
+                        onChange={(e) =>
+                          setDefaultSettings((prev) => ({
+                            ...prev,
+                            companyGSTIN: e.target.value.toUpperCase(),
+                          }))
+                        }
+                      />
+                      <TextField
+                        label="Default Customer GSTIN"
+                        size="small"
+                        value={defaultSettings.customerGSTIN}
+                        inputProps={{ maxLength: 15 }}
+                        onChange={(e) =>
+                          setDefaultSettings((prev) => ({
+                            ...prev,
+                            customerGSTIN: e.target.value.toUpperCase(),
+                          }))
+                        }
+                      />
+                    </>
+                  )}
+                  <FormControl size="small" fullWidth>
+                    <InputLabel>Default Currency</InputLabel>
+                    <Select
+                      label="Default Currency"
+                      value={defaultSettings.currency}
+                      onChange={(e) =>
+                        setDefaultSettings((prev) => {
+                          const selected = e.target.value;
+                          const tax = CURRENCIES.find((c) => c.code === selected)?.defaultTax ?? 0;
+                          return { ...prev, currency: selected, taxRate: String(tax) };
+                        })
+                      }
+                    >
+                      {CURRENCIES.map((c) => (
+                        <MenuItem key={c.code} value={c.code}>
+                          {c.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <TextField
+                    label="Default Tax Rate (%)"
+                    size="small"
+                    type="number"
+                    value={defaultSettings.taxRate}
+                    onChange={(e) =>
+                      setDefaultSettings((prev) => ({ ...prev, taxRate: e.target.value }))
+                    }
+                  />
+                </Stack>
+              </Box>
+
+              <Stack direction="row" spacing={1}>
+                <Button variant="contained" size="small" onClick={saveSettings}>
+                  Save Defaults
+                </Button>
+                <Button variant="outlined" size="small" onClick={applyDefaultValues}>
+                  Apply Now
+                </Button>
+                <Button color="inherit" size="small" onClick={resetSettings}>
+                  Reset
+                </Button>
+              </Stack>
+              </Stack>
+            </Collapse>
+          </Box>
+        </Grid>
+
+        <Grid item xs={12} md={8} lg={9} sx={{ order: { xs: 1, md: 1 } }}>
       <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
         <Box sx={{ flex: 1 }}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Typography variant="h5" className="section-title">
-              Invoice Builder
-            </Typography>
-            {isPro ? (
-              <Chip
-                label="PRO"
-                size="small"
-                sx={{
-                  background: "linear-gradient(135deg,#f59e0b,#d97706)",
-                  color: "#fff",
-                  fontWeight: 700,
-                  fontSize: "0.7rem",
-                }}
-              />
-            ) : (
-              <Tooltip title="Upgrade to Pro to remove watermark from PDF">
-                <Chip
-                  label="FREE"
-                  size="small"
-                  variant="outlined"
-                  sx={{ fontWeight: 600, fontSize: "0.7rem", cursor: "pointer" }}
-                  onClick={() => setIsPro(true)}
-                />
-              </Tooltip>
-            )}
-          </Stack>
+          <Typography variant="h5" className="section-title">
+            Invoice
+          </Typography>
+          <Typography variant="body2" className="section-subtitle">
+            Create and download professional invoices quickly.
+          </Typography>
           {!isPro && (
             <Typography variant="caption" sx={{ color: "#e67e22", mt: 0.5, display: "block" }}>
               Free version — PDF includes watermark.{" "}
@@ -359,7 +734,7 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
         <Grid item xs={12} md={4}>
           <TextField
-            label="Business Name"
+            label={labels.businessName}
             fullWidth
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
@@ -367,7 +742,7 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
         <Grid item xs={12} md={4}>
           <TextField
-            label="Company Email"
+            label={labels.companyEmail}
             fullWidth
             value={companyEmail}
             onChange={(e) => setCompanyEmail(e.target.value)}
@@ -375,12 +750,24 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
         <Grid item xs={12} md={4}>
           <TextField
-            label="Business Mobile"
+            label={labels.businessPhone}
             fullWidth
             value={companyPhone}
             onChange={(e) => setCompanyPhone(e.target.value)}
           />
         </Grid>
+        {isInr && (
+          <Grid item xs={12} md={4}>
+            <TextField
+              label="Business GSTIN"
+              fullWidth
+              value={companyGSTIN}
+              onChange={(e) => setCompanyGSTIN(e.target.value.toUpperCase())}
+              inputProps={{ maxLength: 15 }}
+              placeholder="22AAAAA0000A1Z5"
+            />
+          </Grid>
+        )}
         <Grid item xs={12} sx={{ pt: { xs: 2, md: 1 } }}>
           <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
             Customer Details
@@ -388,7 +775,7 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
         <Grid item xs={12} md={4}>
           <TextField
-            label="Customer Name"
+            label={labels.customerName}
             fullWidth
             value={customer}
             onChange={(e) => setCustomer(e.target.value)}
@@ -396,7 +783,7 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
         <Grid item xs={12} md={4}>
           <TextField
-            label="Client Email"
+            label={labels.customerEmail}
             fullWidth
             value={customerEmail}
             onChange={(e) => setCustomerEmail(e.target.value)}
@@ -404,15 +791,27 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
         <Grid item xs={12} md={4}>
           <TextField
-            label="Customer Mobile"
+            label={labels.customerPhone}
             fullWidth
             value={customerPhone}
             onChange={(e) => setCustomerPhone(e.target.value)}
           />
         </Grid>
+        {isInr && (
+          <Grid item xs={12} md={4}>
+            <TextField
+              label="Customer GSTIN"
+              fullWidth
+              value={customerGSTIN}
+              onChange={(e) => setCustomerGSTIN(e.target.value.toUpperCase())}
+              inputProps={{ maxLength: 15 }}
+              placeholder="22AAAAA0000A1Z5"
+            />
+          </Grid>
+        )}
         <Grid item xs={12} md={4}>
           <TextField
-            label="Invoice Number"
+            label={labels.invoiceNumber}
             fullWidth
             value={invoiceNumber}
             onChange={(e) => setInvoiceNumber(e.target.value)}
@@ -420,7 +819,7 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
         <Grid item xs={12} md={4}>
           <TextField
-            label="Invoice Date"
+            label={labels.invoiceDate}
             placeholder="dd/mm/yyyy"
             fullWidth
             value={invoiceDate}
@@ -430,46 +829,12 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
         <Grid item xs={12} md={4}>
           <TextField
-            label="Due Date"
+            label={labels.dueDate}
             placeholder="dd/mm/yyyy"
             fullWidth
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
             InputLabelProps={{ shrink: true }}
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <TextField
-            label="Currency"
-            fullWidth
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <TextField
-            label="Discount"
-            type="number"
-            fullWidth
-            value={discount}
-            onChange={(e) => setDiscount(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">{currency}</InputAdornment>
-              ),
-            }}
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <TextField
-            label="Tax Rate"
-            type="number"
-            fullWidth
-            value={taxRate}
-            onChange={(e) => setTaxRate(e.target.value)}
-            InputProps={{
-              endAdornment: <InputAdornment position="end">%</InputAdornment>,
-            }}
           />
         </Grid>
       </Grid>
@@ -532,7 +897,7 @@ const InvoiceForm = (): JSX.Element => {
         <Grid container spacing={2} key={index} sx={{ mb: 1.5 }}>
           <Grid item xs={12} md={5}>
             <TextField
-              label="Item / Service"
+              label={labels.itemName}
               fullWidth
               value={item.name}
               onChange={(e) => handleItemChange(index, "name", e.target.value)}
@@ -540,7 +905,7 @@ const InvoiceForm = (): JSX.Element => {
           </Grid>
           <Grid item xs={6} md={2}>
             <TextField
-              label="Qty"
+              label={labels.itemQty}
               type="number"
               fullWidth
               value={item.quantity}
@@ -551,7 +916,7 @@ const InvoiceForm = (): JSX.Element => {
           </Grid>
           <Grid item xs={6} md={3}>
             <TextField
-              label="Rate"
+              label={labels.itemRate}
               type="number"
               fullWidth
               value={item.rate}
@@ -575,19 +940,101 @@ const InvoiceForm = (): JSX.Element => {
         Add Item
       </Button>
 
+      <Grid container spacing={2} sx={{ mt: 2 }}>
+        <Grid item xs={12}>
+          <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
+            Pricing Settings
+          </Typography>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <FormControl fullWidth>
+            <InputLabel>Currency</InputLabel>
+            <Select
+              label="Currency"
+              value={currency}
+              onChange={(e) => handleCurrencyChange(e.target.value)}
+            >
+              {CURRENCIES.map((c) => (
+                <MenuItem key={c.code} value={c.code}>
+                  {c.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <TextField
+            label={labels.discount}
+            type="number"
+            fullWidth
+            value={discount}
+            onChange={(e) => setDiscount(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">{currencySymbol}</InputAdornment>
+              ),
+            }}
+          />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <TextField
+            label={labels.taxRate || `${taxLabel} Rate`}
+            type="number"
+            fullWidth
+            value={taxRate}
+            onChange={(e) => setTaxRate(e.target.value)}
+            helperText={`Default for ${currency}: ${currencyMeta?.defaultTax ?? 0}%`}
+            InputProps={{
+              endAdornment: <InputAdornment position="end">%</InputAdornment>,
+            }}
+          />
+        </Grid>
+        {isInr && (
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>GST Type</InputLabel>
+              <Select
+                label="GST Type"
+                value={gstType}
+                onChange={(e) => setGstType(e.target.value as GstType)}
+              >
+                <MenuItem value="CGST_SGST">CGST + SGST (Intra-state)</MenuItem>
+                <MenuItem value="IGST">IGST (Inter-state)</MenuItem>
+                <MenuItem value="NONE">No GST Breakdown</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        )}
+      </Grid>
+
       <Box className="totals-panel" sx={{ mt: 3 }}>
         <Typography>Subtotal: {money(subtotal)}</Typography>
         <Typography>Discount: {money(discountValue)}</Typography>
-        <Typography>
-          Tax ({taxRate || 0}%): {money(taxAmount)}
-        </Typography>
+        {isInr && gstType === "CGST_SGST" ? (
+          <>
+            <Typography>
+              CGST ({(Number(taxRate || 0) / 2).toFixed(1)}%): {money(cgst)}
+            </Typography>
+            <Typography>
+              SGST ({(Number(taxRate || 0) / 2).toFixed(1)}%): {money(sgst)}
+            </Typography>
+          </>
+        ) : isInr && gstType === "IGST" ? (
+          <Typography>
+            IGST ({taxRate || 0}%): {money(igst)}
+          </Typography>
+        ) : (
+          <Typography>
+            {taxLabel} ({taxRate || 0}%): {money(taxAmount)}
+          </Typography>
+        )}
         <Typography variant="h6">Grand Total: {money(total)}</Typography>
       </Box>
 
       <Grid container spacing={2} sx={{ mt: 2 }}>
         <Grid item xs={12} md={6}>
           <TextField
-            label="Payment Remarks / Terms"
+            label={labels.paymentTerms}
             multiline
             minRows={3}
             fullWidth
@@ -597,13 +1044,15 @@ const InvoiceForm = (): JSX.Element => {
         </Grid>
         <Grid item xs={12} md={6}>
           <TextField
-            label="Internal Notes"
+            label={labels.notes}
             multiline
             minRows={3}
             fullWidth
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
+        </Grid>
+      </Grid>
         </Grid>
       </Grid>
     </Paper>
