@@ -304,22 +304,6 @@ const InvoiceForm = (): JSX.Element => {
     return value;
   };
 
-  const addLine = (
-    doc: jsPDF,
-    label: string,
-    value: string,
-    x: number,
-    y: number,
-    maxWidth: number,
-  ) => {
-    const textLines = value ? doc.splitTextToSize(value, maxWidth) : [""];
-    doc.setFont("helvetica", "bold");
-    doc.text(label, x, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(textLines, x + 42, y);
-
-    return y + textLines.length * 6;
-  };
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
