@@ -1,5 +1,6 @@
 import { useEffect, useState, type JSX } from "react";
 import {
+  Alert,
   Box,
   Chip,
   TextField,
@@ -86,7 +87,7 @@ const DEFAULT_LABELS: LabelSettings = {
   companyEmail: "Company Email",
   businessPhone: "Business Mobile",
   customerName: "Customer Name",
-  customerEmail: "Client Email",
+  customerEmail: "Customer Email",
   customerPhone: "Customer Mobile",
   invoiceNumber: "Invoice Number",
   invoiceDate: "Invoice Date",
@@ -146,6 +147,7 @@ const InvoiceForm = (): JSX.Element => {
   const [defaultSettings, setDefaultSettings] =
     useState<DefaultSettings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(true);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [items, setItems] = useState<InvoiceItem[]>([
     { name: "", quantity: "1", rate: "" },
@@ -262,11 +264,24 @@ const InvoiceForm = (): JSX.Element => {
   const currencyMeta = CURRENCIES.find((c) => c.code === currency);
   const currencySymbol = currencyMeta?.symbol ?? currency;
   const taxLabel = currencyMeta?.taxLabel ?? "Tax";
+  const formatNumber = (value: number): string => {
+    const fixed = value.toFixed(2);
+    const [intPart, decPart] = fixed.split(".");
+    const formatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return `${formatted}.${decPart}`;
+  };
   const money = (value: number) =>
-    `${currencySymbol} ${value.toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
+    `${currencySymbol} ${formatNumber(value)}`;
+
+  // PDF-safe currency symbols (Helvetica can't render ₹, د.إ, ¥)
+  const PDF_SAFE_SYMBOLS: Record<string, string> = {
+    "₹": "Rs.",
+    "د.إ": "AED",
+    "¥": "JPY",
+  };
+  const pdfSymbol = PDF_SAFE_SYMBOLS[currencySymbol] ?? currencySymbol;
+  const pdfMoney = (value: number) =>
+    `${pdfSymbol} ${formatNumber(value)}`;
 
   const getLogoFormat = (dataUrl: string): "PNG" | "JPEG" =>
     dataUrl.includes("image/png") ? "PNG" : "JPEG";
@@ -306,84 +321,131 @@ const InvoiceForm = (): JSX.Element => {
     return y + textLines.length * 6;
   };
 
+  const validate = (): boolean => {
+    const newErrors: Record<string, string> = {};
+    if (!companyName.trim()) newErrors.companyName = "Business name is required";
+    if (!customer.trim()) newErrors.customer = "Customer name is required";
+    if (!invoiceNumber.trim()) newErrors.invoiceNumber = "Invoice number is required";
+    if (!invoiceDate.trim()) newErrors.invoiceDate = "Invoice date is required";
+    items.forEach((item, i) => {
+      if (!item.name.trim()) newErrors[`itemName_${i}`] = "Item name is required";
+      if (!item.rate || Number(item.rate) <= 0) newErrors[`itemRate_${i}`] = "Rate must be > 0";
+    });
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const generatePDF = () => {
+    if (!validate()) return;
     const doc = new jsPDF();
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 14;
+    const rightX = pageW - margin;
     let y = 16;
-    let invoiceMetaStartY = y + 14;
+
+    // ── Header: Logo (left) + INVOICE title & meta (right) ──
+    const metaRightX = rightX;
+    let logoBottomY = y;
 
     if (logoDataUrl) {
-      const logoBoxX = 14;
-      const logoBoxY = y - 5;
-      const logoBoxWidth = 32;
-      const logoBoxHeight = 20;
-      const logoPadding = 2;
-
-      doc.setDrawColor(220);
+      const logoBoxW = 36;
+      const logoBoxH = 22;
+      const pad = 2;
+      doc.setDrawColor(210);
       doc.setFillColor(255, 255, 255);
-      doc.roundedRect(
-        logoBoxX,
-        logoBoxY,
-        logoBoxWidth,
-        logoBoxHeight,
-        2,
-        2,
-        "FD",
-      );
+      doc.roundedRect(margin, y - 4, logoBoxW, logoBoxH, 2, 2, "FD");
       doc.addImage(
         logoDataUrl,
         getLogoFormat(logoDataUrl),
-        logoBoxX + logoPadding,
-        logoBoxY + logoPadding,
-        logoBoxWidth - logoPadding * 2,
-        logoBoxHeight - logoPadding * 2,
+        margin + pad,
+        y - 4 + pad,
+        logoBoxW - pad * 2,
+        logoBoxH - pad * 2,
       );
-
-      const logoBottomY = logoBoxY + logoBoxHeight;
-      invoiceMetaStartY = Math.max(invoiceMetaStartY, logoBottomY + 8);
+      logoBottomY = y - 4 + logoBoxH + 4;
     }
+
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(20);
-    doc.text("INVOICE", 150, y + 4);
-    doc.setFontSize(11);
+    doc.setFontSize(22);
+    doc.setTextColor(12, 31, 51);
+    doc.text("INVOICE", metaRightX, y, { align: "right" });
+
+    doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
+    doc.setTextColor(80, 100, 120);
+    y += 10;
+    doc.text(`${labels.invoiceNumber}: ${invoiceNumber}`, metaRightX, y, { align: "right" });
+    y += 5;
+    doc.text(`${labels.invoiceDate}: ${formatDateForPdf(invoiceDate)}`, metaRightX, y, { align: "right" });
+    if (dueDate) {
+      y += 5;
+      doc.text(`${labels.dueDate}: ${formatDateForPdf(dueDate)}`, metaRightX, y, { align: "right" });
+    }
 
-    y = addLine(doc, labels.invoiceNumber, invoiceNumber, 14, invoiceMetaStartY, 150);
-    y = addLine(doc, labels.invoiceDate, formatDateForPdf(invoiceDate), 14, y, 150);
-    y = addLine(doc, labels.dueDate, formatDateForPdf(dueDate), 14, y, 150);
+    y = Math.max(y + 8, logoBottomY + 4);
 
-    y += 4;
-    doc.setDrawColor(210);
-    doc.line(14, y, 196, y);
+    // ── Divider ──
+    doc.setDrawColor(200, 215, 230);
+    doc.setLineWidth(0.4);
+    doc.line(margin, y, rightX, y);
     y += 8;
 
-    y = addLine(
-      doc,
-      "From",
-      `${companyName} (${companyEmail})${companyPhone ? `, ${companyPhone}` : ""}${companyGSTIN ? ` | GSTIN: ${companyGSTIN}` : ""}`,
-      14,
-      y,
-      150,
-    );
-    y = addLine(
-      doc,
-      "Bill To",
-      `${customer} (${customerEmail})${customerPhone ? `, ${customerPhone}` : ""}${customerGSTIN ? ` | GSTIN: ${customerGSTIN}` : ""}`,
-      14,
-      y,
-      150,
-    );
-
-    y += 6;
+    // ── Business Details (left) + Customer Details (right) ──
+    doc.setTextColor(12, 31, 51);
+    doc.setFontSize(9);
     doc.setFont("helvetica", "bold");
-    doc.text("Items", 14, y);
-    y += 4;
+    doc.text("Business Details", margin, y);
+    doc.text("Customer Details", 112, y);
+    y += 6;
 
-    const tableX = 14;
-    const tableW = 182;
-    const colItemW = 104;
-    const colQtyW = 18;
-    const colRateW = 30;
-    //const colTotalW = 30;
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(60, 80, 100);
+    const bLines: string[] = [];
+    bLines.push(`${labels.businessName}: ${companyName}`);
+    if (companyEmail) bLines.push(`${labels.companyEmail}: ${companyEmail}`);
+    if (companyPhone) bLines.push(`${labels.businessPhone}: ${companyPhone}`);
+    if (companyGSTIN) bLines.push(`GSTIN: ${companyGSTIN}`);
+
+    const cLines: string[] = [];
+    cLines.push(`${labels.customerName}: ${customer}`);
+    if (customerEmail) cLines.push(`${labels.customerEmail}: ${customerEmail}`);
+    if (customerPhone) cLines.push(`${labels.customerPhone}: ${customerPhone}`);
+    if (customerGSTIN) cLines.push(`GSTIN: ${customerGSTIN}`);
+
+    const detailStartY = y;
+    bLines.forEach((line) => {
+      const wrapped = doc.splitTextToSize(line, 88);
+      doc.text(wrapped, margin, y);
+      y += wrapped.length * 4.5;
+    });
+
+    let yRight = detailStartY;
+    cLines.forEach((line) => {
+      const wrapped = doc.splitTextToSize(line, 82);
+      doc.text(wrapped, 112, yRight);
+      yRight += wrapped.length * 4.5;
+    });
+
+    y = Math.max(y, yRight) + 6;
+
+    // ── Divider ──
+    doc.setDrawColor(200, 215, 230);
+    doc.line(margin, y, rightX, y);
+    y += 8;
+
+    // ── Line Items Table ──
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(12, 31, 51);
+    doc.text("Line Items", margin, y);
+    y += 5;
+
+    const tableX = margin;
+    const tableW = pageW - margin * 2;
+    const colItemW = tableW * 0.5;
+    const colQtyW = tableW * 0.12;
+    const colRateW = tableW * 0.19;
+    const colTotalW = tableW - colItemW - colQtyW - colRateW;
     const headerH = 8;
 
     const xItem = tableX;
@@ -392,77 +454,120 @@ const InvoiceForm = (): JSX.Element => {
     const xTotal = xRate + colRateW;
     const xEnd = tableX + tableW;
 
+    // Header row
+    doc.setFontSize(8.5);
     doc.setFont("helvetica", "bold");
-    doc.setFillColor(245, 245, 245);
+    doc.setFillColor(240, 245, 250);
+    doc.setDrawColor(200, 215, 230);
     doc.rect(tableX, y, tableW, headerH, "FD");
-    doc.rect(tableX, y, tableW, headerH);
     doc.line(xQty, y, xQty, y + headerH);
     doc.line(xRate, y, xRate, y + headerH);
     doc.line(xTotal, y, xTotal, y + headerH);
 
-    doc.text("Item", xItem + 2, y + 5.5);
-    doc.text("Qty", xQty + colQtyW / 2, y + 5.5, { align: "center" });
-    doc.text("Rate", xRate + colRateW - 2, y + 5.5, { align: "right" });
-    doc.text("Total", xEnd - 2, y + 5.5, { align: "right" });
+    doc.setTextColor(30, 58, 90);
+    doc.text(labels.itemName, xItem + 3, y + 5.5);
+    doc.text(labels.itemQty, xQty + colQtyW / 2, y + 5.5, { align: "center" });
+    doc.text(labels.itemRate, xRate + colRateW - 3, y + 5.5, { align: "right" });
+    doc.text("Total", xEnd - 3, y + 5.5, { align: "right" });
     y += headerH;
 
+    // Data rows
     doc.setFont("helvetica", "normal");
+    doc.setTextColor(50, 70, 90);
     items.forEach((item, index) => {
       const qty = Number(item.quantity || 0);
       const rate = Number(item.rate || 0);
       const lineTotal = qty * rate;
-      const itemLabel = `${index + 1}. ${item.name || "Service"}`;
-      const itemLines = doc.splitTextToSize(itemLabel, colItemW - 4);
-      const rowH = Math.max(8, itemLines.length * 5 + 2);
+      const itemLabel = item.name || "Service";
+      const itemLines = doc.splitTextToSize(itemLabel, colItemW - 8);
+      const rowH = Math.max(8, itemLines.length * 4.5 + 3);
 
+      // Alternate row background
+      if (index % 2 === 1) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(tableX, y, tableW, rowH, "F");
+      }
+      doc.setDrawColor(220, 230, 240);
       doc.rect(tableX, y, tableW, rowH);
       doc.line(xQty, y, xQty, y + rowH);
       doc.line(xRate, y, xRate, y + rowH);
       doc.line(xTotal, y, xTotal, y + rowH);
 
-      doc.text(itemLines, xItem + 2, y + 5);
-      doc.text(String(qty), xQty + colQtyW / 2, y + rowH / 2 + 1.5, {
-        align: "center",
-      });
-      doc.text(money(rate), xRate + colRateW - 2, y + rowH / 2 + 1.5, {
-        align: "right",
-      });
-      doc.text(money(lineTotal), xEnd - 2, y + rowH / 2 + 1.5, {
-        align: "right",
-      });
+      doc.text(itemLines, xItem + 3, y + 5);
+      doc.text(String(qty), xQty + colQtyW / 2, y + rowH / 2 + 1.5, { align: "center" });
+      const rateText = doc.splitTextToSize(pdfMoney(rate), colRateW - 6);
+      doc.text(rateText, xRate + colRateW - 3, y + rowH / 2 + 1.5, { align: "right" });
+      const totalText = doc.splitTextToSize(pdfMoney(lineTotal), colTotalW - 6);
+      doc.text(totalText, xEnd - 3, y + rowH / 2 + 1.5, { align: "right" });
 
       y += rowH;
     });
 
-    y += 4;
-    doc.setDrawColor(210);
-    doc.line(14, y, 196, y);
     y += 8;
 
-    y = addLine(doc, "Subtotal", money(subtotal), 120, y, 74);
-    y = addLine(doc, "Discount", money(discountValue), 120, y, 74);
+    // ── Totals Panel (right-aligned) ──
+    const totalsX = 120;
+    const totalsValX = rightX;
+    doc.setFontSize(9);
+    doc.setTextColor(60, 80, 100);
+
+    const drawTotalLine = (label: string, value: string, bold = false) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      if (bold) doc.setTextColor(12, 31, 51);
+      else doc.setTextColor(60, 80, 100);
+      doc.text(label, totalsX, y);
+      doc.text(value, totalsValX, y, { align: "right" });
+      y += 5.5;
+    };
+
+    drawTotalLine("Subtotal", pdfMoney(subtotal));
+    if (discountValue > 0) drawTotalLine(labels.discount, `- ${pdfMoney(discountValue)}`);
     if (isInr && gstType === "CGST_SGST") {
-      y = addLine(doc, `CGST (${(Number(taxRate || 0) / 2).toFixed(1)}%)`, money(cgst), 120, y, 74);
-      y = addLine(doc, `SGST (${(Number(taxRate || 0) / 2).toFixed(1)}%)`, money(sgst), 120, y, 74);
+      drawTotalLine(`CGST (${(Number(taxRate || 0) / 2).toFixed(1)}%)`, pdfMoney(cgst));
+      drawTotalLine(`SGST (${(Number(taxRate || 0) / 2).toFixed(1)}%)`, pdfMoney(sgst));
     } else if (isInr && gstType === "IGST") {
-      y = addLine(doc, `IGST (${taxRate || 0}%)`, money(igst), 120, y, 74);
+      drawTotalLine(`IGST (${taxRate || 0}%)`, pdfMoney(igst));
     } else {
-      y = addLine(doc, `${taxLabel} (${taxRate || 0}%)`, money(taxAmount), 120, y, 74);
+      drawTotalLine(`${taxLabel} (${taxRate || 0}%)`, pdfMoney(taxAmount));
     }
 
-    doc.setFont("helvetica", "bold");
-    doc.text(`Grand Total: ${money(total)}`, 120, y + 2);
+    // Grand total with background
+    y += 1;
+    doc.setFillColor(240, 245, 250);
+    doc.roundedRect(totalsX - 3, y - 4, rightX - totalsX + 6, 9, 1, 1, "F");
+    drawTotalLine("Grand Total", pdfMoney(total), true);
 
-    y += 12;
+    y += 8;
+
+    // ── Payment Terms & Notes ──
     if (paymentTerms) {
-      y = addLine(doc, "Payment Terms", paymentTerms, 14, y, 176);
-    }
-    if (notes) {
-      addLine(doc, "Notes", notes, 14, y, 176);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(30, 58, 90);
+      doc.text(labels.paymentTerms, margin, y);
+      y += 5;
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60, 80, 100);
+      const termLines = doc.splitTextToSize(paymentTerms, pageW - margin * 2);
+      doc.text(termLines, margin, y);
+      y += termLines.length * 4.5 + 4;
     }
 
+    if (notes) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(30, 58, 90);
+      doc.text(labels.notes, margin, y);
+      y += 5;
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60, 80, 100);
+      const noteLines = doc.splitTextToSize(notes, pageW - margin * 2);
+      doc.text(noteLines, margin, y);
+      y += noteLines.length * 4.5;
+    }
+
+    // ── Watermark (free version) ──
     if (!isPro) {
-      const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
       doc.setFont("helvetica", "bold");
       doc.setFontSize(52);
@@ -553,7 +658,7 @@ const InvoiceForm = (): JSX.Element => {
                     onChange={(e) => setLabels((prev) => ({ ...prev, customerName: e.target.value }))}
                   />
                   <TextField
-                    label="Label: Client Email"
+                    label="Label: Customer Email"
                     size="small"
                     value={labels.customerEmail}
                     onChange={(e) => setLabels((prev) => ({ ...prev, customerEmail: e.target.value }))}
@@ -724,6 +829,101 @@ const InvoiceForm = (): JSX.Element => {
         </Stack>
       </Stack>
 
+      {Object.keys(errors).length > 0 && (
+        <Alert severity="error" sx={{ mt: 2 }} onClose={() => setErrors({})}>
+          Please fill in all required fields before downloading.
+        </Alert>
+      )}
+
+      <Divider sx={{ my: 3 }} />
+
+      {/* Logo (left) + Invoice meta (right) */}
+      <Stack direction={{ xs: "column", md: "row" }} spacing={2.5} alignItems={{ md: "flex-start" }}>
+        <Box
+          className="logo-upload-zone"
+          sx={{ flex: "0 0 auto", width: { xs: "100%", md: 220 }, opacity: isPro ? 1 : 0.55, pointerEvents: isPro ? "auto" : "none" }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography variant="subtitle2">Company Logo</Typography>
+            {!isPro && (
+              <Chip
+                label="PRO only"
+                size="small"
+                sx={{ fontSize: "0.65rem", height: 18, bgcolor: "#fef3c7", color: "#92400e", pointerEvents: "auto" }}
+              />
+            )}
+          </Stack>
+          {!isPro && (
+            <Typography variant="caption" sx={{ color: "#b45309", display: "block", mb: 0.5 }}>
+              Logo on PDF is a Pro feature.{" "}
+              <Box
+                component="span"
+                sx={{ textDecoration: "underline", cursor: "pointer", pointerEvents: "auto" }}
+                onClick={() => setIsPro(true)}
+              >
+                Upgrade to Pro
+              </Box>
+            </Typography>
+          )}
+          <Button variant="text" component="label" sx={{ mt: 0.5 }} disabled={!isPro}>
+            Upload Logo
+            <input
+              hidden
+              type="file"
+              accept="image/png, image/jpeg"
+              onChange={(e) => handleLogoUpload(e.target.files?.[0] ?? null)}
+            />
+          </Button>
+          {logoDataUrl ? (
+            <Box
+              component="img"
+              src={logoDataUrl}
+              alt="Company logo"
+              className="logo-preview"
+            />
+          ) : (
+            <Typography variant="body2" sx={{ opacity: 0.75 }}>
+              PNG or JPEG logo appears on invoice PDFs.
+            </Typography>
+          )}
+        </Box>
+
+        <Grid container spacing={2} sx={{ flex: 1 }}>
+          <Grid item xs={12} md={4}>
+            <TextField
+              label={labels.invoiceNumber}
+              fullWidth
+              value={invoiceNumber}
+              onChange={(e) => setInvoiceNumber(e.target.value)}
+              error={!!errors.invoiceNumber}
+              helperText={errors.invoiceNumber}
+            />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <TextField
+              label={labels.invoiceDate}
+              placeholder="dd/mm/yyyy"
+              fullWidth
+              value={invoiceDate}
+              onChange={(e) => setInvoiceDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              error={!!errors.invoiceDate}
+              helperText={errors.invoiceDate}
+            />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <TextField
+              label={labels.dueDate}
+              placeholder="dd/mm/yyyy"
+              fullWidth
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Grid>
+        </Grid>
+      </Stack>
+
       <Divider sx={{ my: 3 }} />
 
       <Grid container spacing={2.5}>
@@ -738,6 +938,8 @@ const InvoiceForm = (): JSX.Element => {
             fullWidth
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
+            error={!!errors.companyName}
+            helperText={errors.companyName}
           />
         </Grid>
         <Grid item xs={12} md={4}>
@@ -779,6 +981,8 @@ const InvoiceForm = (): JSX.Element => {
             fullWidth
             value={customer}
             onChange={(e) => setCustomer(e.target.value)}
+            error={!!errors.customer}
+            helperText={errors.customer}
           />
         </Grid>
         <Grid item xs={12} md={4}>
@@ -809,84 +1013,7 @@ const InvoiceForm = (): JSX.Element => {
             />
           </Grid>
         )}
-        <Grid item xs={12} md={4}>
-          <TextField
-            label={labels.invoiceNumber}
-            fullWidth
-            value={invoiceNumber}
-            onChange={(e) => setInvoiceNumber(e.target.value)}
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <TextField
-            label={labels.invoiceDate}
-            placeholder="dd/mm/yyyy"
-            fullWidth
-            value={invoiceDate}
-            onChange={(e) => setInvoiceDate(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <TextField
-            label={labels.dueDate}
-            placeholder="dd/mm/yyyy"
-            fullWidth
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
-        </Grid>
       </Grid>
-
-      <Box
-        className="logo-upload-zone"
-        sx={{ mt: 3, opacity: isPro ? 1 : 0.55, pointerEvents: isPro ? "auto" : "none" }}
-      >
-        <Stack direction="row" spacing={1} alignItems="center">
-          <Typography variant="subtitle2">Company Logo</Typography>
-          {!isPro && (
-            <Chip
-              label="PRO only"
-              size="small"
-              sx={{ fontSize: "0.65rem", height: 18, bgcolor: "#fef3c7", color: "#92400e", pointerEvents: "auto" }}
-            />
-          )}
-        </Stack>
-        {!isPro && (
-          <Typography variant="caption" sx={{ color: "#b45309", display: "block", mb: 0.5 }}>
-            Logo on PDF is a Pro feature.{" "}
-            <Box
-              component="span"
-              sx={{ textDecoration: "underline", cursor: "pointer", pointerEvents: "auto" }}
-              onClick={() => setIsPro(true)}
-            >
-              Upgrade to Pro
-            </Box>
-          </Typography>
-        )}
-        <Button variant="text" component="label" sx={{ mt: 0.5 }} disabled={!isPro}>
-          Upload Logo
-          <input
-            hidden
-            type="file"
-            accept="image/png, image/jpeg"
-            onChange={(e) => handleLogoUpload(e.target.files?.[0] ?? null)}
-          />
-        </Button>
-        {logoDataUrl ? (
-          <Box
-            component="img"
-            src={logoDataUrl}
-            alt="Company logo"
-            className="logo-preview"
-          />
-        ) : (
-          <Typography variant="body2" sx={{ opacity: 0.75 }}>
-            PNG or JPEG logo appears on invoice PDFs.
-          </Typography>
-        )}
-      </Box>
 
       <Divider sx={{ my: 3 }} />
 
@@ -901,6 +1028,8 @@ const InvoiceForm = (): JSX.Element => {
               fullWidth
               value={item.name}
               onChange={(e) => handleItemChange(index, "name", e.target.value)}
+              error={!!errors[`itemName_${index}`]}
+              helperText={errors[`itemName_${index}`]}
             />
           </Grid>
           <Grid item xs={6} md={2}>
@@ -921,6 +1050,8 @@ const InvoiceForm = (): JSX.Element => {
               fullWidth
               value={item.rate}
               onChange={(e) => handleItemChange(index, "rate", e.target.value)}
+              error={!!errors[`itemRate_${index}`]}
+              helperText={errors[`itemRate_${index}`]}
             />
           </Grid>
           <Grid item xs={12} md={2}>
